@@ -1,45 +1,59 @@
 #include <avr/io.h>
-#include "spi.h"
-#include "mcp2515.h"
+#include <util/atomic.h>
 #include "can.h"
-#include "uart.h"
-#include "timer.h"
+#include "mcp2515reg.h"
+#include "mcp2515.h"
+#include "spi.h"
+#include "init.h"
+#include "message.h"
+
+
+/************************************************************************
+ *	GLOBAL VARIABLES
+ */
+extern volatile uint16_t	tx_timer;
 
 /************************************************************************
  *	INITIALIZE CAN
  */
-enum MCP2515_STATUS CAN_Init ( uint8_t can_rate )
+ CanStatus CAN_Init ( const uint8_t can_rate )
 {	
 	MCP2515_DESELECT();
 	if( mcp2515_Init( can_rate ) )
-		return FAILED;
+		return CAN_FAILED;
 	
-	return OK;
+	return CAN_OK;
 }
 
 /************************************************************************
  *	SEND MESSAGE
  */
 
-enum MCP2515_STATUS CAN_SendMsg( const CanMessage *msg )
+CanStatus CAN_SendMsg( const CanMessage *msg )
 {
-	uint8_t addr[2];
+	uint8_t addr[2];							/* [0] : load addr , [1] = RTS addr */
 	
-	if( mcp2515_ChkFreeTxBuf(addr) == OK ){
+	CAN_SetTxTimer();							/* Set Timer */
+	
+	do{
+		if( mcp2515_ChkFreeTxBuf(addr) == MCP2515_OK ){
+			
+			mcp2515_WriteTxBuf( msg, addr[0] );
+			mcp2515_RTS(addr[1]);
+			return CAN_OK;
+		}		
+	} while	( CAN_GetTxTimer() != 0 );			/* Timeout */
 		
-		mcp2515_WriteTxBuf( msg, addr[0] );
-		mcp2515_RTS(addr[1]);
-		return OK;
-	}
-	return FAILED;
+	return CAN_FAILED;
 }
 
 /************************************************************************
  *	RECEIVE MESSAGE
  */
-enum MCP2515_STATUS CAN_ReadMsg ( volatile CanMessage *msg )
+CanStatus CAN_ReadMsg ( volatile CanMessage *msg )
 {
-	uint8_t stat, res;
+	uint8_t stat;
+	CanStatus res;
 	
 	stat = mcp2515_ReadStatus();
 	
@@ -47,17 +61,41 @@ enum MCP2515_STATUS CAN_ReadMsg ( volatile CanMessage *msg )
 		
 		mcp2515_ReadRxBuf( msg, READ_RXB0_SIDH );	/* Read Receive Buffer	*/
 		mcp2515_BitModify( CANINTF, RX0IF, 0);		/* Clear Interrupt Flag */
-		res = OK;
+		res = CAN_OK;
 	}
 	else if ( stat & RX1IF_STATUS ) {				/* Message in Buffer 1 */
 	
 		mcp2515_ReadRxBuf( msg, READ_RXB1_SIDH );	/* Read Receive Buffer	*/
 		mcp2515_BitModify( CANINTF, RX1IF, 0);		/* Clear Interrupt Flag */
-		res = OK;
+		res = CAN_OK;
 	}
 	else {
-		res = FAILED;
+		res = CAN_FAILED;
 	}	
 	
 	return res;
 }
+/************************************************************************
+ *	SET TX TIMER
+ */
+void CAN_SetTxTimer	( void )
+{
+	ATOMIC_BLOCK ( ATOMIC_RESTORESTATE ){
+		tx_timer = TX_TIMEOUT;
+	}
+}
+
+/************************************************************************
+ *	GET TX TIMER
+ */
+uint16_t CAN_GetTxTimer ( void )
+{
+	uint16_t t;
+	
+	ATOMIC_BLOCK ( ATOMIC_RESTORESTATE ){
+		t = tx_timer;
+	}
+	
+	return t;
+}
+

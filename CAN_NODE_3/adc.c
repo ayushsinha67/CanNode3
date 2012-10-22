@@ -1,8 +1,10 @@
 #include <avr/io.h>
 #include "adc.h"
 
-/* Initialize ADC */
-void Init_ADC(void)
+/************************************************************************
+ *	INITIALIZE ADC
+ */
+void ADC_Init(void)
 {
     /*
         10 Bit ADC
@@ -10,19 +12,32 @@ void Init_ADC(void)
         ADC Freq: 1000000/8 = 125000 Hz
         AREF = AVcc
     */
-    ADMUX  = (1<<REFS0);
-    ADCSRA = (1<<ADEN) | (1<<ADPS1) | (1<<ADPS0);
+    ADMUX  = ( 1 << REFS0 );
+    ADCSRA = ( 1 << ADEN ) | ( 1 << ADPS1) | ( 1 << ADPS0 );
 }
 
-//--------------------------------------
-/* Read ADC Channel */
+/************************************************************************
+ *	READ CHANNEL
+ */
 
-uint16_t ADC_read( uint8_t ch)
+uint16_t ADC_Read( uint8_t ch)
 {
-   ADMUX   = ( (ch&0b00000111) | (1<<REFS0) );  //Select ADC Channel ch must be 0-7
-   ADCSRA |= (1<<ADSC);                         //Start Single conversion
-   while( !(ADCSRA & (1<<ADIF)) );              //Wait for conversion to complete
-   ADCSRA |= (1<<ADIF);                         //Clear ADIF by writing one to it
+   ADMUX   = ( ( ADMUX & 0xE0 ) | ( ch & 0x07 ) );		/* Select ADC Channel ch must be 0-7 */
+   ADCSRA |= ( 1 << ADSC );								/* Start Single conversion */
+   
+   while( !( ADCSRA & ( 1 << ADIF ) ) );				/* Wait for conversion to complete */
+   
+   ADCSRA |= ( 1 << ADIF );								/* Clear ADIF by writing one to it */
 
    return ADC;
+}
+
+/************************************************************************
+ *	ADC DISABLE
+ */
+
+void ADC_Disable ( void )
+{
+	ADCSRA = 0x00;
+	ADMUX  = 0x00;
 }

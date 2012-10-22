@@ -1,6 +1,7 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <avr/pgmspace.h>
+#include <stdlib.h>
 #include "uart.h"
 
 /************************************************************************
@@ -8,11 +9,18 @@
  */
 void UART_Init (void)
 {
-    UCSRB |= (1 << RXEN) | (1 << TXEN);						// Turn on the transmission and reception circuitry
-    UCSRC |= (1 << URSEL) | (1 << UCSZ0) | (1 << UCSZ1);	// Use 8-bit character sizes
+    UCSRB |= (1 << RXEN) | (1 << TXEN);						/* Turn on the transmission and reception circuitry */
+    UCSRC |= (1 << URSEL) | (1 << UCSZ0) | (1 << UCSZ1);	/* Use 8-bit character sizes */
     UBRRL = BAUD_PRESCALE;
     UBRRH = (BAUD_PRESCALE >> 8);
-	UCSRB |= (1 << RXCIE);									// Enable the USART interrupt
+
+#if ( UART_RX_INT == 1 )									/* Select RX Interrupt */
+	UCSRB |= (1 << RXCIE);	
+#endif
+
+#if ( UART_TX_INT == 1 )									/* Select TX Interrupt */
+	UCSRB |= (1 << TXCIE);	
+#endif						
 }
 
 /************************************************************************

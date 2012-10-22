@@ -1,23 +1,106 @@
 #include <avr/io.h>
 #include <avr/pgmspace.h>
+#include <util/atomic.h>
 #include "terminal.h"
 #include "uart.h"
+#include "mcp2515reg.h"
 #include "mcp2515.h"
-#include "can.h"
+//#include "can.h"
+
+/************************************************************************
+ *	GLOBAL VARIABLES
+ */
+volatile	TERM_STATE			state	= TERM_DISABLE;
+volatile	CFG_STATE			cfg		= CFG_NORMAL;
+volatile	MSGSTRM_STATE		strm	= MS_DISABLE; 
+TERM_STATE		state_copy;
+MSGSTRM_STATE	strm_copy;
+
+/************************************************************************
+ *	START SCREEN
+ */
+void term_Start( CanStatus res )
+{
+	UART_TxStr_p( PSTR("\nNodeview v1.0 (c) Ayush Sinha\n") );
+	
+	if( res == CAN_OK )
+		UART_TxStr_p( PSTR("\nCAN Initialized\n") ); 
+    else 
+		UART_TxStr_p( PSTR("\nCAN Initialization Failed\n") ); 
+	
+	term_Commands();										/* Show commands */
+}
+/************************************************************************
+ *	MAIN FUNCTION ROUTINE
+ */
+void term_Main( void )
+{
+	ATOMIC_BLOCK( ATOMIC_FORCEON ){							/* Read terminal state */
+	state_copy = state;
+	strm_copy  = strm;
+	}
+		
+	switch( state_copy ) {									/* terminal function call */
+																
+		case TERM_CANINIT	: term_Start( CAN_Init(CAN_SPEED) );
+							  break;
+		case TERM_CTRLREG	: term_CtrlReg();		break;
+		case TERM_RXSTAT	: term_RxStatus();		break;
+		case TERM_READSTAT	: term_ReadStatus();	break;
+		case TERM_INTFLAG	: term_IntFlag();		break;
+		case TERM_ERRFLAG	: term_ErrorFlag();		break;
+		case TERM_TXBUF		: term_TxBuffer();		break;
+		case TERM_RXBUF		: term_RxBuffer();		break;
+		case TERM_MASK      : term_Mask();			break;
+		case TERM_FILT		: term_Filt();			break;
+		
+		case TERM_MSGSTREAM	: if( strm_copy == MS_DISABLE ){ /* Enable/Disable Streaming of Received Data */	
+								strm_copy = MS_STREAM;
+								UART_TxStr_p( PSTR("\nSTREAM\n") );					  		
+							  }
+							  else{
+								 strm_copy = MS_DISABLE;
+							  }
+						      break;
+							  
+		case TERM_LOOPBACK  : if( cfg == CFG_NORMAL ){		/* Change to Loopback Mode */
+									mcp2515_SetMode( MODE_LOOPBACK ); 
+									cfg = CFG_LOOPBACK;	
+									UART_TxStr_p( PSTR("\nLOOPBACK MODE\n") );
+							  }
+							  else { 
+									mcp2515_SetMode( MODE_NORMAL );
+									 cfg = CFG_NORMAL; 
+									 UART_TxStr_p( PSTR("\nNORMAL MODE\n") );
+							  } 
+							  break;
+		case TERM_HELP		: term_Commands();   break;	
+					default	: break;
+		}	
+																				
+	ATOMIC_BLOCK( ATOMIC_FORCEON ){							/* Copy back */
+		state = TERM_DISABLE;
+		strm  = strm_copy;
+	}	
+}
 
 /************************************************************************
  *	DISPLAY COMMAND REGISTERS
  */
 void term_Commands	(void)
 {
-	UART_TxStr_p( PSTR("\nCOMMANDS \nc : \tControl Registers\n") );
+	UART_TxStr_p( PSTR("\nCOMMANDS \n") );
+	UART_TxStr_p( PSTR("i : \tCAN Initialize\n") );
+	UART_TxStr_p( PSTR("c : \tControl Registers\n") );
 	UART_TxStr_p( PSTR("x : \tRX Status\n") );
 	UART_TxStr_p( PSTR("s : \tRead Status\n") );
-	UART_TxStr_p( PSTR("i : \tInterrupt Flags\n") );
+	UART_TxStr_p( PSTR("f : \tInterrupt Flags\n") );
 	UART_TxStr_p( PSTR("e : \tError Flags\n") );
 	UART_TxStr_p( PSTR("t : \tTransmit Buffer\n") );
 	UART_TxStr_p( PSTR("r : \tReceive Buffer\n") );
-	UART_TxStr_p( PSTR("q : \tMessage Stream\n") );
+	UART_TxStr_p( PSTR("k : \tMasks\n") );
+	UART_TxStr_p( PSTR("g : \tFilters\n") );
+	UART_TxStr_p( PSTR("m : \tMessage Stream\n") );
 	UART_TxStr_p( PSTR("l : \tLoopback\n") );
 	UART_TxStr_p( PSTR("h : \tHelp\n") );
 }
@@ -27,7 +110,7 @@ void term_Commands	(void)
  */
 void term_CtrlReg(void)
 {
-	uint8_t stat = mcp2515_Read( CANSTAT);
+	uint8_t stat = mcp2515_Read(CANSTAT);					/* Read Status */
 	
 	UART_TxStr_p( PSTR("\nCONTROL REGISTERS -----------------------------------\n\n") );	
 	UART_TxStr_p( PSTR("MODE:\t\t") );		UART_TxHex( stat >> 5 );	
@@ -129,7 +212,6 @@ void term_RxStatus(void)
 /************************************************************************
  *	DISPLAY INTERRUPT FLAGS
  */
-
 void term_IntFlag(void)
 {
 	uint8_t data = mcp2515_Read( CANINTF );
@@ -178,96 +260,164 @@ void term_ErrorFlag(void)
  */
 void term_TxBuffer(void)
 {
-	uint8_t  data[14];
+	uint8_t  data[13];
 	
-	UART_TxStr_p( PSTR("\nTRANSMIT BUFFER -----------------------------------\n\n") );
+	UART_TxStr_p( PSTR("\n\nTRANSMIT BUFFER -----------------------------------\n\n") );
 	UART_TxStr_p( PSTR("\tSID\tEXIDE\tDLC\tCAN Data\n\n"));
 	
-	// ------------- TXB0
+	/* TXB0 */
 	UART_TxStr_p( PSTR("TXB0:\t") ); 
-	mcp2515_ReadRegs( TXB0CTRL, data, 14 );
-	term_BufTab( data );
+	mcp2515_ReadRegs( TXB0SIDH, data, 13 );
+	term_BufTab( TXB0SIDH, data );
 	
-	// --------------- TXB1
+	/* TXB1 */
 	UART_TxStr_p( PSTR("TXB1:\t") );
-	mcp2515_ReadRegs( TXB1CTRL, data, 14 );
-	term_BufTab( data );
+	mcp2515_ReadRegs( TXB1SIDH, data, 13 );
+	term_BufTab( TXB1SIDH, data );
 	
-	// --------------- TXB2
+	/* TXB2 */
 	UART_TxStr_p( PSTR("TXB2:\t") );
-	mcp2515_ReadRegs( TXB2CTRL, data, 14 );
-	term_BufTab( data );	
+	mcp2515_ReadRegs( TXB2SIDH, data, 13 );
+	term_BufTab( TXB2SIDH, data );	
 }
-
 
 /************************************************************************
  *	DISPLAY RECEIVE BUFFER
  */
 void term_RxBuffer (void)
 {
-	uint8_t  data[14];
+	uint8_t  data[13];
 	
-	UART_TxStr_p( PSTR("\nRECEIVE BUFFER -----------------------------------\n\n") );
+	UART_TxStr_p( PSTR("\n\nRECEIVE BUFFER -----------------------------------\n\n") );
 	UART_TxStr_p( PSTR("\tSID\tEXIDE\tDLC\tCAN Data\n\n"));
 	
-	// ------------- RXB0
+	/* RXB0 */
 	UART_TxStr_p( PSTR("RXB0:\t") ); 
-	mcp2515_ReadRegs( RXB0CTRL, data, 14 );
-	term_BufTab( data );
+	mcp2515_ReadRegs( RXB0SIDH, data, 13 );
+	term_BufTab( RXB0SIDH, data );
 	
-	// --------------- RXB1
+	/* RXB1 */
 	UART_TxStr_p( PSTR("RXB1:\t") );
-	mcp2515_ReadRegs( RXB1CTRL, data, 14 );
-	term_BufTab( data );
+	mcp2515_ReadRegs( RXB1SIDH, data, 13 );
+	term_BufTab( RXB1SIDH, data );
 }
 
-/************************************************************************
- *	TABULATE BUFFER DATA
- */
-void term_BufTab( uint8_t *data)
-{
-	if( ( data[2] & TXB_EXIDE) == TXB_EXIDE  ){					// EID
-		UART_TxHex( data[1] >> 3 );
-		UART_TxHex( ( (data[1] & 0x07) << 5 ) | (data[2] & 0x03 ) | ( (data[2] & 0xE0) >>3 )  );	UART_TxChar('\t');	
-		UART_TxHex( data[3] );									// EID8 
-		UART_TxHex( data[4] );	UART_TxChar('\t');				// EID0	
-	}	
-	else{	
-		UART_TxHex( data[1] >> 5 );								// SID
-		UART_TxHex( (data[1] << 3) | ( data[2] >> 5) );	UART_TxChar('\t');
-		UART_TxHex( 0x00 );									
-		UART_TxHex( 0x00 );		UART_TxChar('\t');				
-	}					
-	
-	UART_TxHex( data[5] );	UART_TxChar('\t');					// DLC
-	
-	for( uint8_t i = 6; (i < (6 + data[5])) && (i < 14); i++ ){	// Data
-		UART_TxHex(data[i]);
-		UART_TxChar(' ');
-	}
-	UART_TxChar('\n');	
-}
-
-/************************************************************************
- *	DISPLAY FILTERS
- */
-void term_Filter (void)
-{
-	
-}
 
 /************************************************************************
  *	DISPLAY MASKS
  */
 void term_Mask (void)
 {
+	mcp2515_SetMode( MODE_CONFIG );									/* Only accessible in this mode */
+	
+	uint8_t  data[4];
+	
+	UART_TxStr_p( PSTR("\n\nMASKS -----------------------------------\n\n") );
+	UART_TxStr_p( PSTR("\tSID\tEXIDE\n\n"));
+	
+	/* RXM0 */
+	UART_TxStr_p( PSTR("RXM0:\t") ); 
+	mcp2515_ReadRegs( RXM0SIDH, data, 4 );
+	term_BufTab( RXM0SIDH, data );
+	
+	/* RXM1 */
+	UART_TxStr_p( PSTR("\nRXM1:\t") );
+	mcp2515_ReadRegs( RXM1SIDH, data, 4 );
+	term_BufTab( RXM1SIDH, data );	
+	
+	mcp2515_SetMode( MODE_NORMAL );									/* Reset to Normal Mode */
+}
+
+/************************************************************************
+ *	DISPLAY FILTERS
+ */
+void term_Filt (void)
+{
+	mcp2515_SetMode( MODE_CONFIG );									/* Only accessible in this mode */
+	
+	uint8_t  data[4];
+	
+	UART_TxStr_p( PSTR("\n\nFILTERS -----------------------------------\n\n") );
+	UART_TxStr_p( PSTR("\tSID\tEXIDE\n\n"));
+	
+	/* FILT0 */
+	UART_TxStr_p( PSTR("FILT0:\t") ); 
+	mcp2515_ReadRegs( RXF0SIDH, data, 4 );
+	term_BufTab( RXF0SIDH, data );
+	
+	/* FILT1 */
+	UART_TxStr_p( PSTR("\nFILT1:\t") );
+	mcp2515_ReadRegs( RXF1SIDH, data, 4 );
+	term_BufTab( RXF1SIDH, data );	
+	
+	/* FILT2 */
+	UART_TxStr_p( PSTR("\nFILT2:\t") );
+	mcp2515_ReadRegs( RXF2SIDH, data, 4 );
+	term_BufTab( RXF2SIDH, data );	
+	
+	/* FILT3 */
+	UART_TxStr_p( PSTR("\nFILT3:\t") );
+	mcp2515_ReadRegs( RXF3SIDH, data, 4 );
+	term_BufTab( RXF3SIDH, data );	
+	
+	/* FILT4 */
+	UART_TxStr_p( PSTR("\nFILT4:\t") );
+	mcp2515_ReadRegs( RXF4SIDH, data, 4 );
+	term_BufTab( RXF4SIDH, data );	
+	
+	/* FILT5 */
+	UART_TxStr_p( PSTR("\nFILT5:\t") );
+	mcp2515_ReadRegs( RXF5SIDH, data, 4 );
+	term_BufTab( RXF5SIDH, data );	
+	
+	mcp2515_SetMode( MODE_NORMAL );									/* Reset to Normal Mode */	
+}
+
+/************************************************************************
+ *	TABULATE BUFFER DATA
+ */
+void term_BufTab( uint8_t addr, uint8_t *data)
+{
+	if( ( data[1] & TXB_EXIDE) == TXB_EXIDE  ){						/* EID */
+		UART_TxHex( data[0] >> 3 );
+		UART_TxHex( ( (data[0] & 0x07) << 5 ) | (data[1] & 0x03 ) | ( (data[1] & 0xE0) >>3 )  );	UART_TxChar('\t');	
+		UART_TxHex( data[2] );										/* EID8 */
+		UART_TxHex( data[3] );	UART_TxChar('\t');					/* EID0 */	
+	}	
+	else{	
+		UART_TxHex( data[0] >> 5 );									/* SID */
+		UART_TxHex( (data[0] << 3) | ( data[1] >> 5) );	UART_TxChar('\t');
+		UART_TxChar('\t');				
+	}					
+	
+	uint8_t p;
+	
+	switch( addr ){													/* Check Address */
+		case TXB0SIDH :
+		case TXB1SIDH :
+		case TXB2SIDH :
+		case RXB0SIDH :
+		case RXB1SIDH : p = 1; break;
+			  default : p = 0; break;
+	}
+	
+	if( p == 1 ){													/* Only for Rx/Tx Buffers */						
+		
+		UART_TxHex( data[4] );	UART_TxChar('\t');					/* DLC */
+	
+		for( uint8_t i = 5; (i < (5 + data[4])) && (i < 13); i++ ){	/* Data */
+			UART_TxHex(data[i]);
+			UART_TxChar(' ');
+		}
+		UART_TxChar('\n');		
+	}
 	
 }
 
 /************************************************************************
  *	DISPLAY RECEIVED MESSAGE
  */
-void term_RxMsg	(volatile CanMessage *msg)
+void term_RxMsg	(CanMessage *msg)
 {
 	UART_TxStr_p( PSTR("Rcvd:\t") );
 	if( msg->ext == 0 ){
@@ -283,11 +433,36 @@ void term_RxMsg	(volatile CanMessage *msg)
 		UART_TxHex( (uint8_t) ( msg->id ) );		UART_TxChar('\t');
 	}
 	
-	UART_TxHex( msg->dlc );						UART_TxChar('\t');
+	UART_TxHex( msg->dlc );							UART_TxChar('\t');
 	
 	for( uint8_t i = 0; i < msg->dlc; i++ ){
-		UART_TxHex( msg->data[i] );				UART_TxChar(' ');	
+		UART_TxHex( msg->data[i] );					UART_TxChar(' ');	
 	}
 	UART_TxChar('\n');
+}
+
+/************************************************************************
+ *	RECEIVE INTERRUPT
+ */
+ISR(USART_RXC_vect)
+{
+	uint8_t data = UDR; 
+	switch( data ) {
+		
+		case 'i': state = TERM_CANINIT;	 break;
+		case 'c': state = TERM_CTRLREG;  break;
+		case 'x': state = TERM_RXSTAT;	 break;
+		case 's': state = TERM_READSTAT; break;
+		case 'f': state = TERM_INTFLAG;	 break;
+		case 'e': state = TERM_ERRFLAG;	 break;
+		case 't': state = TERM_TXBUF;	 break;
+		case 'r': state = TERM_RXBUF;	 break;
+		case 'k': state = TERM_MASK;	 break;
+		case 'g': state = TERM_FILT;	 break;
+		case 'm': state = TERM_MSGSTREAM;break;
+		case 'l': state = TERM_LOOPBACK; break;
+		case 'h': state = TERM_HELP;	 break; 	
+		default : state = TERM_DISABLE;	 break;	
+		}	
 }
 

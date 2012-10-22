@@ -1,11 +1,11 @@
 /*
  * CAN_NODE_3.c
- *
- * Created: 01-09-2012 AM 9:18:14
- *  Author: Admin
+ * 
+ * Status: NODE 3
+ * 
+ * Created: 01-06-2012 AM 11:11:52
+ *  Author: Ayush Sinha
  */ 
-
-
 #define  F_CPU 16000000
 #include <avr/io.h>
 #include <util/delay.h>
@@ -13,109 +13,233 @@
 #include <avr/pgmspace.h>
 #include <util/atomic.h>
 #include <avr/wdt.h>
-#include "global.h"
-#include "timer.h"
-#include "uart.h"
-#include "lcd_hd44780.h"
+#include "init.h"
 #include "spi.h"
 #include "adc.h"
-#include "terminal.h"
 #include "uart.h"
+#include "mcp2515reg.h"
 #include "mcp2515.h"
 #include "can.h"
+#include "buffer.h"
+#include "messagedef.h"
+#include "message.h"
+#include "pneumatic.h"
+
+#if ( TERMINAL == 1 )
+#include "uart.h"
+#include "terminal.h"							
+extern volatile MSGSTRM_STATE	strm;
+#endif
 
 /************************************************************************
- *	GLOBAL VARIABLES
+ *	GLOBALS
  */
-CanMessage gps, brake, pressure;
-volatile CanMessage temp;
-volatile enum TERM_STATE	state	= TERM_DISABLE;
-volatile enum CFG_STATE		cfg		= CFG_NORMAL;
-volatile enum MSGSTRM_STATE	strm	= MS_DISABLE; 
-enum TERM_STATE		state_copy;
-enum MSGSTRM_STATE  strm_copy;
-enum MCP2515_STATUS res;
+/* Messages */
+volatile CanMessage rec;
+CanMessage PneumaticShift, PneumaticOnline;
+
+/* Buffer */
+volatile CanBuffer  RxBuffer;
+volatile CanBuffer  TxBuffer;
+
+/* Timer */
+volatile uint16_t	tx_timer = 0;
+volatile uint16_t	tick_msg1 = 0, tick_msg2 = 0,
+					tick_msg3 = 0, tick_msg4 = 0, tick_msg5 = 0, 
+					tick_msg6 = 0, tick_msg7 = 0;
+/* Pneumatic */		
+PneumaticState Pneum_State = PNEUM_IDLE;	
+volatile uint16_t solenoid_ticker = 0;
 
 /************************************************************************
  *	MAIN
  */
+
 int main(void)
-{	
-	ExtINT_Init();										/* Initializations */
-	Timer_Init();	
-	UART_Init();			
-	SPI_Init();
-	WDT_Init();	
-	Init_ADC();
-	sei();			
+{	 
+	CanMessage tmp;											/* Local Variables */
+
+#if ( TERMINAL == 1 )
+	UART_Init();											/* UART */
+	ADC_Init();												/* ADC */
+#endif	
+												
+	GPIO_Init();											/* GPIO */
+	ExtINT_Init();											/* External Interrupt */
+	Timer_Init();											/* Timers */											
+	SPI_Init();												/* SPI */
+											
+	CanStatus res = CAN_Init(CAN_SPEED);					/* Start CAN */	
 	
-	res = CAN_Init(CAN_250KBPS);						/* Start CAN */				
-	
-#ifdef TERMINAL		
-	UART_TxStr_p( PSTR("NODE MECHANIC (c) Ayush Sinha\n") );
-	if( res == OK ){ UART_TxStr_p( PSTR("\nCAN Initialized\n") ); }
-    else           { UART_TxStr_p( PSTR("\nCAN Initialization Failed\n") ); }
-	term_Commands();
+#if ( TERMINAL == 1 )		
+	term_Start(res);										/* Start Terminal */
 #endif
 	
-	Msg_Init();											/* Construct Data to be sent */
+	Msg_Init();												/* Construct Messages to be sent */
+	
+	CAN_BufInit( &RxBuffer, CAN_RX_BUFFER_SIZE );			/* Initialize Receive Buffer */
+	CAN_BufInit( &TxBuffer, CAN_TX_BUFFER_SIZE );			/* Initialize Transmit Buffer */
+	
+	sei();													/* Enable Global Interrupts */
 
+/* ---------------------------*/
 	while(1){
 		
-		wdt_enable(WDTO_1S);							/* Enable Watchdog Timer for 1 second */
+		wdt_enable(WDTO_1S);								/* Enable Watchdog Timer for 2 second */
 		
-		uint16_t val = ADC_read(0);
-		pressure.data[0] = (uint8_t) ( val >> 8 );
-		pressure.data[1] = (uint8_t) val;
+		/* ------------------------------------------ */
 		
-		//CAN_SendMsg(&brake);		
-		CAN_SendMsg(&pressure);
-		CAN_SendMsg(&gps);
+		Pneumatic_ChkState();								/* Pneumatic States */
 		
 		
+		/* ------------------------------------------ */
+		/* Send Messages */
 		
+		// Get Data
 		
+		ATOMIC_BLOCK( ATOMIC_FORCEON ){
+			
+			if( CAN_BufState( &TxBuffer ) != BUFFER_EMPTY ){/* Check if empty */
+				
+				CAN_BufDeq( &TxBuffer, &tmp );				/* Dequeue */
+				CAN_SendMsg( &tmp );						/* Send */
+			}
+			
+		}										
 		
+		/* ------------------------------------------ */		
+		/* Receive Messages */
 		
-#ifdef TERMINAL											/* TERMINAL FOR DEBUGGIN */
+		ATOMIC_BLOCK( ATOMIC_FORCEON ){						/* Read Interrupt variables */
+			
+			if( CAN_BufState( &RxBuffer ) != BUFFER_EMPTY ){/* Check if not empty */
+		
+				CAN_BufDeq( &RxBuffer, &tmp );				/* Dequeue */
+				
+				Msg_Chk( &tmp );							/* Check Received Message */		
 
-	ATOMIC_BLOCK( ATOMIC_FORCEON ){						/* Read terminal state */
-		state_copy = state;
-		strm_copy  = strm;
-	}
-		
-	switch( state_copy ) {
-		
-		case TERM_CTRLREG	: term_CtrlReg();    break;
-		case TERM_RXSTAT	: term_RxStatus();	 break;
-		case TERM_READSTAT	: term_ReadStatus(); break;
-		case TERM_INTFLAG	: term_IntFlag();	 break;
-		case TERM_ERRFLAG	: term_ErrorFlag();	 break;
-		case TERM_TXBUF		: term_TxBuffer();	 break;
-		case TERM_RXBUF		: term_RxBuffer();	 break;
-		case TERM_MSGSTREAM	: strm_copy = (strm_copy == MS_DISABLE) ? MS_STREAM : MS_DISABLE;	 
-						      break;
-		case TERM_LOOPBACK  : if( cfg == CFG_NORMAL ){ 
-									mcp2515_SetMode( MODE_LOOPBACK ); 
-									cfg = CFG_LOOPBACK;	
-							  }
-							  else { 
-									mcp2515_SetMode( MODE_NORMAL );
-									 cfg = CFG_NORMAL; 
-							  } 
-							  break;
-		case TERM_HELP		: term_Commands();   break;	
-					default	: break;
-		}	
-																				
-	ATOMIC_BLOCK( ATOMIC_FORCEON ){							/* Copy back */
-		state = TERM_DISABLE;
-		strm  = strm_copy;
-	}	
-		
+#if ( TERMINAL == 1 )		
+				if( strm == MS_STREAM )						/* Enable Terminal Message Stream */
+					term_RxMsg( &tmp );
 #endif
-		wdt_reset();										/* Reset if Execution time < Watchdog time */
-		_delay_ms(100);										/* DELAY */
+			}										
+		}				
+
+		/* ------------------------------------------ */
+		
+#if ( TERMINAL == 1 )											
+	term_Main();											/* TERMINAL FOR DEBUGGING */
+#endif
+
     }
+	
+	wdt_reset();											/* Reset Watchdog */
+	wdt_disable();
+	
 	return 0;
 }
+
+/************************************************************************
+ *	INT0 - CAN RECEIVED MESSAGE 
+ */
+ISR(INT0_vect)
+{	
+	CAN_ReadMsg( &rec );									/* Read Message Received */
+	
+	if( CAN_BufState( &RxBuffer ) != BUFFER_FULL )		
+		CAN_BufEnq( &RxBuffer, &rec );						/* Enqueue to Receive Buffer */
+	
+}
+ 
+/************************************************************************
+ *	TIMER0 INTERRUPT (1 MS)
+ */ 
+ ISR(TIMER0_COMP_vect)
+{
+	if( tx_timer > 0 )										/* Transmit decrement timer  */
+		tx_timer--;
+	
+	/* Enqueue into Transmit Buffer */	
+	if( tick_msg1++ >= RATE_MSG1 ){							/* Message 1 */
+		
+		if( CAN_BufState( &TxBuffer ) != BUFFER_FULL )
+			CAN_BufEnq( &TxBuffer, &PneumaticOnline );
+		
+		tick_msg1 = 0;	
+	}	
+	
+	if( tick_msg2++ >= RATE_MSG2 ){							/* Message 2 */
+		
+		if( CAN_BufState( &TxBuffer ) != BUFFER_FULL )
+			//CAN_BufEnq( &TxBuffer, &Brake );	
+		
+		tick_msg2 = 0;		
+	}
+	
+	if( tick_msg3++ >= RATE_MSG3 ){							/* Message 3 */
+		
+		if( CAN_BufState( &TxBuffer ) != BUFFER_FULL )
+			//CAN_BufEnq( &TxBuffer, &throttle );	
+		
+		tick_msg3 = 0;		
+	}
+	
+	if( tick_msg4++ >= RATE_MSG4 ){							/* Message 4 */
+		
+		if( CAN_BufState( &TxBuffer ) != BUFFER_FULL )
+			//CAN_BufEnq( &TxBuffer, &throttle );	
+		
+		tick_msg4 = 0;		
+	}
+	
+	if( tick_msg5++ >= RATE_MSG5 ){							/* Message 5 */
+		
+		if( CAN_BufState( &TxBuffer ) != BUFFER_FULL )
+			//CAN_BufEnq( &TxBuffer, &throttle );	
+		
+		tick_msg5 = 0;		
+	}
+	
+	if( tick_msg6++ >= RATE_MSG6 ){							/* Message 6 */
+		
+		if( CAN_BufState( &TxBuffer ) != BUFFER_FULL )
+			//CAN_BufEnq( &TxBuffer, &throttle );	
+		
+		tick_msg6 = 0;		
+	}
+	
+	if( tick_msg7++ >= RATE_MSG7 ){							/* Message 7 */
+		
+		if( CAN_BufState( &TxBuffer ) != BUFFER_FULL )
+			//CAN_BufEnq( &TxBuffer, &throttle );	
+		
+		tick_msg7 = 0;		
+	}
+}
+
+/************************************************************************
+ *	TIMER2 INTERRUPT (1 MS)
+ */ 
+ ISR(TIMER2_COMP_vect)
+ {
+	if( solenoid_ticker > 0 )								/* SOLENOID DECREMENT TICKER */
+		solenoid_ticker--;
+ }
+ 
+/************************************************************************
+ *	INT1 INTERRUPT - PNEUMATIC BUTTON 1
+ */
+ISR( INT1_vect )
+{	
+	
+}
+
+/************************************************************************
+ *	INT2 INTERRUPT - PNEUMATIC BUTTON 2
+ */
+ISR( INT2_vect )
+{	
+	
+}
+
+ 
