@@ -60,31 +60,25 @@
 
 /************************************************************************
  *	CAN SPEED
- *	PropSeg + PS1 >= PS2
- *	PropSeg + PS1 >= TDELAY
- *	PS2 > SJW
- *  (PHSEG1 + 1) x TQ
- *  (PRSEG + 1) x TQ
- *  (PHSEG2 + 1) x TQ     [Minimum valid setting for PS2 is 2 TQ ]
- *  TQ = (2 * (BRP + 1)) / F_CAN
- *  SJW = 2 (normally), SJW = 1 ( 1 MBPS )
+ *
+ *	PropSeg + PHS1		>=	PHS2
+ *	PropSeg + PHS1		>=	TDELAY
+ *	PS2					>	SJW
+ *  Propogation Segment =	(PRSEG + 1)  * TQ
+ *  Phase Segment 1		=	(PHSEG1 + 1) * TQ
+ *  Phase Segment 2		=	(PHSEG2 + 1) * TQ     [Minimum valid setting for PS2 is 2*TQ ]
+ *  TQ					=	(2 * (BRP + 1) ) / F_CAN
+ *  SJW					=	2 (normally)
+ *  SJW					=	1 ( 1 MBPS )
  */
-
-#define F_OSC			16000		/* KHz */
-#define PROPSEG			0x01		/* 2TQ - 1 */
-#define PHSEG1			0x30		/* 7TQ - 1 */
-#define PHSEG2			0x05		/* 6TQ - 1 */
-#define PROPSEG_1MBPS	0x01
-#define PHSEG1_1MBPS	0x80
-#define PHSEG2_1MBPS	0x01
-#define CAN_20KBPS		20
-#define CAN_25KBPS		25
-#define CAN_50KBPS		50
-#define CAN_100KBPS		100
-#define CAN_125KBPS		125
-#define CAN_250KBPS		250
-#define CAN_500KBPS		500
-#define CAN_1MBPS		1000
+#define CAN_20KBPS		1
+#define CAN_25KBPS		2
+#define CAN_50KBPS		3
+#define CAN_100KBPS		4
+#define CAN_125KBPS		5
+#define CAN_250KBPS		6
+#define CAN_500KBPS		7
+#define CAN_1MBPS		8
 
 /************************************************************************
  *  ENUMERATIONS
@@ -103,20 +97,20 @@ typedef enum
 /* SPI Driver */
 void	mcp2515_Reset			( void );
 uint8_t mcp2515_Read			( const uint8_t address );
-void	mcp2515_ReadRegs		( const uint8_t address, uint8_t data[], const uint8_t n );
+void	mcp2515_ReadRegs		( const uint8_t address, uint8_t *data, const uint8_t n );
 void	mcp2515_Write			( const uint8_t address, const uint8_t data );
-void	mcp2515_WriteRegs		( const uint8_t address, const uint8_t data[], const uint8_t n );
+void	mcp2515_WriteRegs		( const uint8_t address, const uint8_t *data, const uint8_t n );
 void    mcp2515_BitModify		( const uint8_t address, const uint8_t mask, const uint8_t data );
-void	mcp2515_StrRXBUF		( const uint8_t buffer, uint8_t data[], const uint8_t n );
-void	mcp2515_LoadTXBUF		( const uint8_t buffer, const uint8_t data[], const uint8_t n );
+void	mcp2515_StrRXBUF		( const uint8_t buffer, uint8_t *data, const uint8_t n );
+void	mcp2515_LoadTXBUF		( const uint8_t buffer, const uint8_t *data, const uint8_t n );
 void    mcp2515_RTS				( const uint8_t buffer );
 uint8_t	mcp2515_ReadStatus		( void );
 uint8_t	mcp2515_RXStatus		( void );
 
 /* Configuration */
 mcp2515Status	mcp2515_Init		( const uint8_t can_rate );
+mcp2515Status	mcp2515_ConfigRate	( const uint8_t can_rate );
 mcp2515Status	mcp2515_SetMode		( const uint8_t mode );
-mcp2515Status	mcp2515_ConfigRate	( const uint16_t can_rate );
 void			mcp2515_ConfigFilt  ( const uint8_t mode );
 void			mcp2515_ClrBuffers	( void );
 void			mcp2515_ConfigPins  ( void );

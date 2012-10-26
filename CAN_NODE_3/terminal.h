@@ -42,19 +42,20 @@ typedef enum									/* Message Stream State */
 /************************************************************************
  *	FUNCTION PROTOTYPES
  */
-void term_Main			( void );
-void term_Start			( CanStatus res );
-void term_Commands		( void );
-void term_CtrlReg		( void );
-void term_ReadStatus	( void );
-void term_RxStatus		( void );
-void term_IntFlag		( void );
-void term_ErrorFlag		( void );
-void term_TxBuffer		( void );
-void term_BufTab		( uint8_t addr, uint8_t *data );
-void term_RxMsg			( CanMessage *msg );
-void term_RxBuffer		( void );
-void term_Filt			( void );
-void term_Mask			( void );
+void		term_Main			( void );
+void		term_Start			( CanStatus res );
+TERM_STATE	term_GetState		( uint8_t s );
+void		term_Commands		( void );
+void		term_CtrlReg		( void );
+void		term_ReadStatus		( void );
+void		term_RxStatus		( void );
+void		term_IntFlag		( void );
+void		term_ErrorFlag		( void );
+void		term_TxBuffer		( void );
+void		term_BufTab			( uint8_t addr, uint8_t *data );
+void		term_RxMsg			( CanMessage *msg );
+void		term_RxBuffer		( void );
+void		term_Filt			( void );
+void		term_Mask			( void );
 
 #endif

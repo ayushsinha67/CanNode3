@@ -3,9 +3,9 @@
 #include <util/atomic.h>
 #include "terminal.h"
 #include "uart.h"
+#include "uart_buffer.h"
 #include "mcp2515reg.h"
 #include "mcp2515.h"
-//#include "can.h"
 
 /************************************************************************
  *	GLOBAL VARIABLES
@@ -13,15 +13,15 @@
 volatile	TERM_STATE			state	= TERM_DISABLE;
 volatile	CFG_STATE			cfg		= CFG_NORMAL;
 volatile	MSGSTRM_STATE		strm	= MS_DISABLE; 
-TERM_STATE		state_copy;
-MSGSTRM_STATE	strm_copy;
+
+extern volatile UartBuffer UART_RxBuffer;
 
 /************************************************************************
  *	START SCREEN
  */
 void term_Start( CanStatus res )
 {
-	UART_TxStr_p( PSTR("\nNodeview v1.0 (c) Ayush Sinha\n") );
+	UART_TxStr_p( PSTR("\nCAN NodeView v1.0 (c) Ayush Sinha\n") );
 	
 	if( res == CAN_OK )
 		UART_TxStr_p( PSTR("\nCAN Initialized\n") ); 
@@ -30,58 +30,79 @@ void term_Start( CanStatus res )
 	
 	term_Commands();										/* Show commands */
 }
+
+/************************************************************************
+ *	GET STATE
+ */
+TERM_STATE	term_GetState	( uint8_t s )
+{
+	switch(s) {
+		
+		case 'i': return TERM_CANINIT;	break;
+		case 'c': return TERM_CTRLREG;  break;
+		case 'x': return TERM_RXSTAT;	break;
+		case 's': return TERM_READSTAT; break;
+		case 'f': return TERM_INTFLAG;	break;
+		case 'e': return TERM_ERRFLAG;	break;
+		case 't': return TERM_TXBUF;	break;
+		case 'r': return TERM_RXBUF;	break;
+		case 'k': return TERM_MASK;		break;
+		case 'g': return TERM_FILT;		break;
+		case 'm': return TERM_MSGSTREAM;break;
+		case 'l': return TERM_LOOPBACK; break;
+		case 'h': return TERM_HELP;		break;
+		default : return TERM_DISABLE;	break;
+	}
+}
+
 /************************************************************************
  *	MAIN FUNCTION ROUTINE
  */
 void term_Main( void )
 {
-	ATOMIC_BLOCK( ATOMIC_FORCEON ){							/* Read terminal state */
-	state_copy = state;
-	strm_copy  = strm;
-	}
-		
-	switch( state_copy ) {									/* terminal function call */
+	if( UART_BufState( &UART_RxBuffer ) != UART_BUFFER_EMPTY )
+		state = UART_BufDeq( &UART_RxBuffer );				/* Dequeue */
+
+	switch( term_GetState(state) ) {						/* terminal function call */
 																
-		case TERM_CANINIT	: term_Start( CAN_Init(CAN_SPEED) );
-							  break;
-		case TERM_CTRLREG	: term_CtrlReg();		break;
-		case TERM_RXSTAT	: term_RxStatus();		break;
-		case TERM_READSTAT	: term_ReadStatus();	break;
-		case TERM_INTFLAG	: term_IntFlag();		break;
-		case TERM_ERRFLAG	: term_ErrorFlag();		break;
-		case TERM_TXBUF		: term_TxBuffer();		break;
-		case TERM_RXBUF		: term_RxBuffer();		break;
-		case TERM_MASK      : term_Mask();			break;
-		case TERM_FILT		: term_Filt();			break;
+		case TERM_CANINIT	: term_Start( CAN_Init(CAN_SPEED) );	break;
+		case TERM_CTRLREG	: term_CtrlReg();						break;
+		case TERM_RXSTAT	: term_RxStatus();						break;
+		case TERM_READSTAT	: term_ReadStatus();					break;
+		case TERM_INTFLAG	: term_IntFlag();						break;
+		case TERM_ERRFLAG	: term_ErrorFlag();						break;
+		case TERM_TXBUF		: term_TxBuffer();						break;
+		case TERM_RXBUF		: term_RxBuffer();						break;
+		case TERM_MASK      : term_Mask();							break;
+		case TERM_FILT		: term_Filt();							break;
 		
-		case TERM_MSGSTREAM	: if( strm_copy == MS_DISABLE ){ /* Enable/Disable Streaming of Received Data */	
-								strm_copy = MS_STREAM;
-								UART_TxStr_p( PSTR("\nSTREAM\n") );					  		
+		case TERM_MSGSTREAM	: if( strm == MS_DISABLE ){		/* Enable/Disable Streaming of Received Data */	
+								strm = MS_STREAM;
+								UART_TxStr_p( PSTR("STREAM\n") );					  		
 							  }
 							  else{
-								 strm_copy = MS_DISABLE;
+								strm = MS_DISABLE;
 							  }
-						      break;
+							  break;
 							  
-		case TERM_LOOPBACK  : if( cfg == CFG_NORMAL ){		/* Change to Loopback Mode */
-									mcp2515_SetMode( MODE_LOOPBACK ); 
-									cfg = CFG_LOOPBACK;	
-									UART_TxStr_p( PSTR("\nLOOPBACK MODE\n") );
+		case TERM_LOOPBACK  : if( cfg == CFG_NORMAL ){		/* Change to Loop-back Mode */
+								mcp2515_SetMode( MODE_LOOPBACK ); 
+								cfg = CFG_LOOPBACK;	
+								UART_TxStr_p( PSTR("LOOPBACK MODE\n") );
 							  }
 							  else { 
-									mcp2515_SetMode( MODE_NORMAL );
-									 cfg = CFG_NORMAL; 
-									 UART_TxStr_p( PSTR("\nNORMAL MODE\n") );
+								mcp2515_SetMode( MODE_NORMAL );
+								cfg = CFG_NORMAL;
+								UART_TxStr_p( PSTR("NORMAL MODE\n") );
 							  } 
 							  break;
+							  
 		case TERM_HELP		: term_Commands();   break;	
+		
 					default	: break;
-		}	
-																				
-	ATOMIC_BLOCK( ATOMIC_FORCEON ){							/* Copy back */
-		state = TERM_DISABLE;
-		strm  = strm_copy;
 	}	
+																				
+	state = TERM_DISABLE;									/* Disable multiple print */
 }
 
 /************************************************************************
@@ -444,25 +465,11 @@ void term_RxMsg	(CanMessage *msg)
 /************************************************************************
  *	RECEIVE INTERRUPT
  */
-ISR(USART_RXC_vect)
+ISR( USART_RXC_vect )
 {
-	uint8_t data = UDR; 
-	switch( data ) {
-		
-		case 'i': state = TERM_CANINIT;	 break;
-		case 'c': state = TERM_CTRLREG;  break;
-		case 'x': state = TERM_RXSTAT;	 break;
-		case 's': state = TERM_READSTAT; break;
-		case 'f': state = TERM_INTFLAG;	 break;
-		case 'e': state = TERM_ERRFLAG;	 break;
-		case 't': state = TERM_TXBUF;	 break;
-		case 'r': state = TERM_RXBUF;	 break;
-		case 'k': state = TERM_MASK;	 break;
-		case 'g': state = TERM_FILT;	 break;
-		case 'm': state = TERM_MSGSTREAM;break;
-		case 'l': state = TERM_LOOPBACK; break;
-		case 'h': state = TERM_HELP;	 break; 	
-		default : state = TERM_DISABLE;	 break;	
-		}	
+	uint8_t data = UDR;
+	
+	if( UART_BufState( &UART_RxBuffer) != UART_BUFFER_FULL )		
+		UART_BufEnq( &UART_RxBuffer, data );						/* Enqueue incoming commands to buffer */
 }
 

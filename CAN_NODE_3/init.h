@@ -11,10 +11,7 @@
 #define TOG(a,b) (a^=b)
 
 /* Terminal Debugging */
-#define TERMINAL		1	
-
-/* Timer */
-#define TX_TIMEOUT		100						
+#define TERMINAL		1							
 
 /************************************************************************
  *	FUNCTIONS

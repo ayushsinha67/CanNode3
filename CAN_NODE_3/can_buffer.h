@@ -8,8 +8,8 @@
 /************************************************************************
  *	DEFINES
  */
-#define CAN_TX_BUFFER_SIZE		8	
-#define CAN_RX_BUFFER_SIZE		8	
+#define CAN_TX_BUFFER_SIZE		20	
+#define CAN_RX_BUFFER_SIZE		20	
 
 /************************************************************************
  *	DATA TYPES
@@ -29,11 +29,11 @@ typedef struct
  */
 typedef enum 
 {
-	BUFFER_FULL = 0,
-	BUFFER_MID,
-	BUFFER_EMPTY
+	CAN_BUFFER_FULL = 0,
+	CAN_BUFFER_MID,
+	CAN_BUFFER_EMPTY
 	
-} BufferState;
+} CanBufferState;
 
 /************************************************************************
  *	FUNCTIONS
@@ -41,6 +41,6 @@ typedef enum
 void		    CAN_BufInit ( volatile CanBuffer *buf, uint8_t size );
 void    		CAN_BufEnq  ( volatile CanBuffer *buf, volatile CanMessage *msg  );
 void	        CAN_BufDeq  ( volatile CanBuffer *buf, volatile CanMessage *msg );
-BufferState     CAN_BufState( volatile CanBuffer *buf  );
+CanBufferState  CAN_BufState( volatile CanBuffer *buf  );
 
 #endif 

@@ -1,8 +1,6 @@
 #ifndef PNEUMATIC_H_
 #define PNEUMATIC_H_
 
-#include "can.h"
-
 /************************************************************************
  *	DEFINES
  */
@@ -36,6 +34,5 @@ typedef enum
  *	FUNCTIONS
  */
 void Pneumatic_ChkState ( void );
-void Pneumatic_RecMsg	( CanMessage *m );
 
 #endif /* PNEUMATIC_H_ */

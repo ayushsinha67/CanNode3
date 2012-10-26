@@ -7,12 +7,6 @@
 #include "init.h"
 #include "message.h"
 
-
-/************************************************************************
- *	GLOBAL VARIABLES
- */
-extern volatile uint16_t	tx_timer;
-
 /************************************************************************
  *	INITIALIZE CAN
  */
@@ -31,20 +25,20 @@ extern volatile uint16_t	tx_timer;
 
 CanStatus CAN_SendMsg( const CanMessage *msg )
 {
-	uint8_t addr[2];							/* [0] : load addr , [1] = RTS addr */
+	uint8_t addr[2];								/* [0] : load addr , [1] = RTS addr */
 	
-	CAN_SetTxTimer();							/* Set Timer */
-	
-	do{
-		if( mcp2515_ChkFreeTxBuf(addr) == MCP2515_OK ){
-			
-			mcp2515_WriteTxBuf( msg, addr[0] );
-			mcp2515_RTS(addr[1]);
-			return CAN_OK;
-		}		
-	} while	( CAN_GetTxTimer() != 0 );			/* Timeout */
+	if( mcp2515_ChkFreeTxBuf(addr) == MCP2515_OK ){
+													/* Flash LED */
+		mcp2515_BitModify( BFPCTRL, RXB0_DIGINPSTATE, RXB0_DIGINPSTATE );
 		
-	return CAN_FAILED;
+		mcp2515_WriteTxBuf( msg, addr[0] );	
+		mcp2515_RTS(addr[1]);						/* Transmit Message */
+		
+		mcp2515_BitModify( BFPCTRL, RXB0_DIGINPSTATE, ~RXB0_DIGINPSTATE );
+		return CAN_OK;
+	}
+	else
+		return CAN_FAILED;
 }
 
 /************************************************************************
@@ -75,27 +69,3 @@ CanStatus CAN_ReadMsg ( volatile CanMessage *msg )
 	
 	return res;
 }
-/************************************************************************
- *	SET TX TIMER
- */
-void CAN_SetTxTimer	( void )
-{
-	ATOMIC_BLOCK ( ATOMIC_RESTORESTATE ){
-		tx_timer = TX_TIMEOUT;
-	}
-}
-
-/************************************************************************
- *	GET TX TIMER
- */
-uint16_t CAN_GetTxTimer ( void )
-{
-	uint16_t t;
-	
-	ATOMIC_BLOCK ( ATOMIC_RESTORESTATE ){
-		t = tx_timer;
-	}
-	
-	return t;
-}
-

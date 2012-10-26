@@ -3,23 +3,13 @@
 #include <util/atomic.h>
 #include "pneumatic.h"
 #include "can.h"
-#include "buffer.h"
 #include "init.h"
-
-#if ( TERMINAL == 1 )
-#include "uart.h"
-#include "terminal.h"
-#endif
 
 /************************************************************************
  *	GLOBAL VARIABLES
  */
 /* Can Message */
-extern CanMessage PneumaticShift, PneumaticOnline;
-
-/* Buffer */
-extern volatile CanBuffer  RxBuffer;
-extern volatile CanBuffer  TxBuffer;
+extern CanMessage PneumaticOnline;
 
 /* Pneumatic */
 extern PneumaticState Pneum_State;
@@ -58,34 +48,4 @@ void Pneumatic_ChkState ( void )
 	else
 		PneumaticOnline.data[0] = PNEUM_OFFLINE;
 	
-}
-
-/************************************************************************
- *	RECEIVE PNEUMATIC MESSAGE
- */
-void Pneumatic_RecMsg( CanMessage *m )
-{
-	/* UPSHIFT */
-	if( ( m->data[0] == PNEUM_MSG_UPSHIFT ) && ( Pneum_State == PNEUM_IDLE) ){							
-
-#if ( TERMINAL == 1 )
-		UART_TxStr_p( PSTR("UP\n") );
-#endif	
-		SET( PORT_SHIFT, 1<<PIN_SHIFT_UP );									/* Opposite Solenoid Command */
-		Pneum_State = PNEUM_PRESSED_UP;								
-		solenoid_ticker = SHIFT_TIMEOUT;
-	}	
-	
-	/* DOWNSHIFT */
-	else if ( ( m->data[0] == PNEUM_MSG_DOWNSHIFT ) && ( Pneum_State == PNEUM_IDLE ) ){					
-
-#if ( TERMINAL == 1 )
-		UART_TxStr_p( PSTR("DOWN\n") );	
-#endif							
-		SET( PORT_SHIFT, 1<<PIN_SHIFT_DOWN );								/* Opposite Solenoid Command */
-		Pneum_State = PNEUM_PRESSED_DOWN;		
-		solenoid_ticker = SHIFT_TIMEOUT;					
-	}	
-	
-	/* Parse to LCD */
 }

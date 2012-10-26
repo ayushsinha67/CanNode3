@@ -8,7 +8,7 @@
  *	DEFINES
  */
 /* Message Sending Rate (ms) */				
-#define RATE_MSG1				100
+#define RATE_MSG1				1
 #define RATE_MSG2				50
 #define RATE_MSG3				300
 #define RATE_MSG4				400
@@ -21,5 +21,6 @@
  */
 void Msg_Init			( void );
 void Msg_Chk			( CanMessage *msg );
+void Pneumatic_RecMsg	( CanMessage *m );
 
 #endif /* MESSAGE_H_ */

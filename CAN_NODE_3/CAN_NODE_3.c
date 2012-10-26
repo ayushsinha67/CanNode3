@@ -20,33 +20,35 @@
 #include "mcp2515reg.h"
 #include "mcp2515.h"
 #include "can.h"
-#include "buffer.h"
+#include "can_buffer.h"
 #include "messagedef.h"
 #include "message.h"
 #include "pneumatic.h"
 
 #if ( TERMINAL == 1 )
 #include "uart.h"
+#include "uart_buffer.h"
 #include "terminal.h"							
 extern volatile MSGSTRM_STATE	strm;
+volatile UartBuffer UART_RxBuffer;
 #endif
 
 /************************************************************************
  *	GLOBALS
  */
+/* CAN Buffer */
+volatile CanBuffer  RxBuffer;
+volatile CanBuffer  TxBuffer;
+
 /* Messages */
 volatile CanMessage rec;
 CanMessage PneumaticShift, PneumaticOnline;
 
-/* Buffer */
-volatile CanBuffer  RxBuffer;
-volatile CanBuffer  TxBuffer;
-
 /* Timer */
-volatile uint16_t	tx_timer = 0;
 volatile uint16_t	tick_msg1 = 0, tick_msg2 = 0,
 					tick_msg3 = 0, tick_msg4 = 0, tick_msg5 = 0, 
 					tick_msg6 = 0, tick_msg7 = 0;
+					
 /* Pneumatic */		
 PneumaticState Pneum_State = PNEUM_IDLE;	
 volatile uint16_t solenoid_ticker = 0;
@@ -62,80 +64,67 @@ int main(void)
 #if ( TERMINAL == 1 )
 	UART_Init();											/* UART */
 	ADC_Init();												/* ADC */
-#endif	
-												
+#endif
+	
 	GPIO_Init();											/* GPIO */
 	ExtINT_Init();											/* External Interrupt */
-	Timer_Init();											/* Timers */											
+	Timer_Init();											/* Timers */
 	SPI_Init();												/* SPI */
-											
-	CanStatus res = CAN_Init(CAN_SPEED);					/* Start CAN */	
 	
-#if ( TERMINAL == 1 )		
+	CanStatus res = CAN_Init(CAN_SPEED);					/* Start CAN */
+	
+#if ( TERMINAL == 1 )
 	term_Start(res);										/* Start Terminal */
+	UART_BufInit( &UART_RxBuffer, UART_RX_BUFFER_SIZE );	/* UART receive buffer */
 #endif
 	
 	Msg_Init();												/* Construct Messages to be sent */
 	
 	CAN_BufInit( &RxBuffer, CAN_RX_BUFFER_SIZE );			/* Initialize Receive Buffer */
 	CAN_BufInit( &TxBuffer, CAN_TX_BUFFER_SIZE );			/* Initialize Transmit Buffer */
-	
-	sei();													/* Enable Global Interrupts */
 
-/* ---------------------------*/
+	sei();													/* Enable Global Interrupts */
+	
+	wdt_enable(WDTO_1S);									/* Enable Watchdog Timer */
+
+	/* --------------- LOOP FOREVER ----------------------*/
 	while(1){
-		
-		wdt_enable(WDTO_1S);								/* Enable Watchdog Timer for 2 second */
-		
-		/* ------------------------------------------ */
 		
 		Pneumatic_ChkState();								/* Pneumatic States */
 		
+		/* Send Messages ---------------------------- */
+		ATOMIC_BLOCK( ATOMIC_FORCEON ){
+			
+			if( CAN_BufState( &TxBuffer ) != CAN_BUFFER_EMPTY ){
+				
+				CAN_BufDeq( &TxBuffer, &tmp );				/* Dequeue Transmit Buffer */
+				CAN_SendMsg( &tmp );						/* Send */
+			}
+		}
 		
-		/* ------------------------------------------ */
-		/* Send Messages */
-		
-		// Get Data
+		/* Receive Messages ------------------------- */
 		
 		ATOMIC_BLOCK( ATOMIC_FORCEON ){
 			
-			if( CAN_BufState( &TxBuffer ) != BUFFER_EMPTY ){/* Check if empty */
+			if( CAN_BufState( &RxBuffer ) != CAN_BUFFER_EMPTY ){
 				
-				CAN_BufDeq( &TxBuffer, &tmp );				/* Dequeue */
-				CAN_SendMsg( &tmp );						/* Send */
-			}
-			
-		}										
-		
-		/* ------------------------------------------ */		
-		/* Receive Messages */
-		
-		ATOMIC_BLOCK( ATOMIC_FORCEON ){						/* Read Interrupt variables */
-			
-			if( CAN_BufState( &RxBuffer ) != BUFFER_EMPTY ){/* Check if not empty */
-		
-				CAN_BufDeq( &RxBuffer, &tmp );				/* Dequeue */
-				
-				Msg_Chk( &tmp );							/* Check Received Message */		
+				CAN_BufDeq( &RxBuffer, &tmp );				/* Dequeue Receive Buffer */
+				Msg_Chk( &tmp );							/* Check Received Message */
 
-#if ( TERMINAL == 1 )		
+#if ( TERMINAL == 1 )
 				if( strm == MS_STREAM )						/* Enable Terminal Message Stream */
-					term_RxMsg( &tmp );
+				term_RxMsg( &tmp );
 #endif
-			}										
-		}				
+			}
+		}
 
 		/* ------------------------------------------ */
 		
-#if ( TERMINAL == 1 )											
-	term_Main();											/* TERMINAL FOR DEBUGGING */
+#if ( TERMINAL == 1 )
+		term_Main();										/* TERMINAL FOR DEBUGGING */
 #endif
-
-    }
-	
-	wdt_reset();											/* Reset Watchdog */
-	wdt_disable();
-	
+		wdt_reset();										/* Reset Watchdog */
+	}
 	return 0;
 }
 
@@ -146,9 +135,8 @@ ISR(INT0_vect)
 {	
 	CAN_ReadMsg( &rec );									/* Read Message Received */
 	
-	if( CAN_BufState( &RxBuffer ) != BUFFER_FULL )		
+	if( CAN_BufState( &RxBuffer ) != CAN_BUFFER_FULL )		
 		CAN_BufEnq( &RxBuffer, &rec );						/* Enqueue to Receive Buffer */
-	
 }
  
 /************************************************************************
@@ -156,29 +144,27 @@ ISR(INT0_vect)
  */ 
  ISR(TIMER0_COMP_vect)
 {
-	if( tx_timer > 0 )										/* Transmit decrement timer  */
-		tx_timer--;
+	/* Enqueue into Transmit Buffer ------------------------------------ */
 	
-	/* Enqueue into Transmit Buffer */	
 	if( tick_msg1++ >= RATE_MSG1 ){							/* Message 1 */
-		
-		if( CAN_BufState( &TxBuffer ) != BUFFER_FULL )
-			CAN_BufEnq( &TxBuffer, &PneumaticOnline );
-		
-		tick_msg1 = 0;	
-	}	
 	
+		if( CAN_BufState( &TxBuffer ) != CAN_BUFFER_FULL )
+			CAN_BufEnq( &TxBuffer, &PneumaticOnline );
+	
+		tick_msg1 = 0;
+	}
+
 	if( tick_msg2++ >= RATE_MSG2 ){							/* Message 2 */
-		
-		if( CAN_BufState( &TxBuffer ) != BUFFER_FULL )
-			//CAN_BufEnq( &TxBuffer, &Brake );	
-		
-		tick_msg2 = 0;		
+
+		if( CAN_BufState( &TxBuffer ) != CAN_BUFFER_FULL )
+			//CAN_BufEnq( &TxBuffer, &Brake );
+
+		tick_msg2 = 0;
 	}
 	
 	if( tick_msg3++ >= RATE_MSG3 ){							/* Message 3 */
 		
-		if( CAN_BufState( &TxBuffer ) != BUFFER_FULL )
+		if( CAN_BufState( &TxBuffer ) != CAN_BUFFER_FULL )
 			//CAN_BufEnq( &TxBuffer, &throttle );	
 		
 		tick_msg3 = 0;		
@@ -186,7 +172,7 @@ ISR(INT0_vect)
 	
 	if( tick_msg4++ >= RATE_MSG4 ){							/* Message 4 */
 		
-		if( CAN_BufState( &TxBuffer ) != BUFFER_FULL )
+		if( CAN_BufState( &TxBuffer ) != CAN_BUFFER_FULL )
 			//CAN_BufEnq( &TxBuffer, &throttle );	
 		
 		tick_msg4 = 0;		
@@ -194,7 +180,7 @@ ISR(INT0_vect)
 	
 	if( tick_msg5++ >= RATE_MSG5 ){							/* Message 5 */
 		
-		if( CAN_BufState( &TxBuffer ) != BUFFER_FULL )
+		if( CAN_BufState( &TxBuffer ) != CAN_BUFFER_FULL )
 			//CAN_BufEnq( &TxBuffer, &throttle );	
 		
 		tick_msg5 = 0;		
@@ -202,7 +188,7 @@ ISR(INT0_vect)
 	
 	if( tick_msg6++ >= RATE_MSG6 ){							/* Message 6 */
 		
-		if( CAN_BufState( &TxBuffer ) != BUFFER_FULL )
+		if( CAN_BufState( &TxBuffer ) != CAN_BUFFER_FULL )
 			//CAN_BufEnq( &TxBuffer, &throttle );	
 		
 		tick_msg6 = 0;		
@@ -210,7 +196,7 @@ ISR(INT0_vect)
 	
 	if( tick_msg7++ >= RATE_MSG7 ){							/* Message 7 */
 		
-		if( CAN_BufState( &TxBuffer ) != BUFFER_FULL )
+		if( CAN_BufState( &TxBuffer ) != CAN_BUFFER_FULL )
 			//CAN_BufEnq( &TxBuffer, &throttle );	
 		
 		tick_msg7 = 0;		
